@@ -32,7 +32,7 @@ jobs:
       - name: Prepare test labels 
         
         run: |
-          echo "${{ secrets.TEST_LABELS }}" > data/test_labels.csv
+          echo "${{ secrets.TEST_LABELS }}" > test_labels.csv
           
       - name: Evaluate submission
         id: evaluate
@@ -111,5 +111,5 @@ jobs:
       - name: Clean up secrets
         if: always()
         run: |
-          rm -f data/test_labels.csv evaluation_result.json
+          rm -f test_labels.csv evaluation_result.json
           echo "🧹 Cleaned up temporary files"
