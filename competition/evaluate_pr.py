@@ -89,11 +89,11 @@ def run_evaluation():
             raise ValueError("ID mismatch between predictions and labels")
         
         # Calculate ROC-AUC
-        roc_auc = binary_auc(merged["y_true"], merged["y_pred"])
+        roc_auc = binary_auc(merged["label"], merged["y_pred"])
         
         # Calculate accuracy for reference
         binary_pred = (merged["y_pred"] >= 0.5).astype(int)
-        accuracy = (binary_pred == merged["y_true"]).mean()
+        accuracy = (binary_pred == merged["label"]).mean()
         
         # Prepare result
         result = {
