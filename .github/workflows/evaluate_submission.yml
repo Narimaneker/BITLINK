@@ -32,7 +32,7 @@ jobs:
       - name: Decode private test labels
         
         run: |
-          echo "${{ secrets.TEST_LABELS}}" > data/test_labels.csv
+          echo "${{ secrets.TEST_LABELS}}" > test_labels.csv
           
       - name: Evaluate submission
         id: evaluate
