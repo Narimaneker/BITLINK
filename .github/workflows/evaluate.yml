@@ -1,0 +1,57 @@
+name: Evaluate Submission
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.10
+
+      - name: Install dependencies
+        run: pip install pandas scikit-learn
+
+      - name: Decode test labels
+        run: |
+          echo "${{ secrets.TEST_LABELS_BASE64 }}" | base64 --decode > test_labels.csv
+
+      - name: Evaluate submission
+        run: |
+          python competition/evaluate.py submission.csv test_labels.csv > result.txt
+
+      - name: Extract score
+        run: |
+          SCORE=$(grep SCORE result.txt | cut -d '=' -f2)
+          echo "SCORE=$SCORE" >> $GITHUB_ENV
+
+      - name: Check if user already submitted
+        run: |
+          if grep -q "${{ github.actor }}" leaderboard.csv; then
+            echo "User already submitted!"
+            exit 1
+          fi
+
+      - name: Update leaderboard
+        run: |
+          echo "${{ github.actor }},${{ env.SCORE }}" >> leaderboard.csv
+
+      - name: Commit leaderboard
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add leaderboard.csv
+          git commit -m "Update leaderboard"
+          git push
