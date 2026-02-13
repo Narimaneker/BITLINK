@@ -1,0 +1,7 @@
+{
+  "team": "test_team",
+  "run_id": "run_001",
+  "model": "baseline",
+  "llm_name": "none",
+  "notes": "Random baseline predictions for testing the submission system"
+}
