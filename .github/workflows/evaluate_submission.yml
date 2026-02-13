@@ -1,0 +1,115 @@
+name: Evaluate Submission
+
+on:
+  pull_request:
+    paths:
+      - 'submissions/inbox/**'
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          pip install pandas numpy scikit-learn
+          
+      - name: Decode private test labels
+        
+        run: |
+          echo "${{ secrets.TEST_LABELS}}" > data/test_labels.csv
+          
+      - name: Evaluate submission
+        id: evaluate
+        run: |
+          python competition/evaluate_pr.py
+          
+      - name: Post results as comment
+        uses: actions/github-script@v7
+        if: always()
+        with:
+          script: |
+            const fs = require('fs');
+            
+            // Read evaluation result
+            let result;
+            try {
+              const resultData = fs.readFileSync('evaluation_result.json', 'utf8');
+              result = JSON.parse(resultData);
+            } catch (error) {
+              // If evaluation crashed before creating result file
+              result = {
+                valid: false,
+                errors: 'Evaluation failed to complete. Check workflow logs.'
+              };
+            }
+            
+            // Build comment
+            let comment = '## 🤖 Submission Evaluation Results\n\n';
+            
+            if (result.valid) {
+              comment += '### ✅ Submission Valid!\n\n';
+              comment += '| Field | Value |\n';
+              comment += '|-------|-------|\n';
+              comment += `| **Team** | ${result.team} |\n`;
+              comment += `| **Run ID** | ${result.run_id} |\n`;
+              comment += `| **Model Type** | ${result.model} |\n`;
+              comment += `| **LLM Used** | ${result.llm_name} |\n`;
+              comment += `| **ROC-AUC Score** | **${result.roc_auc.toFixed(4)}** |\n`;
+              comment += `| **Accuracy** | ${result.accuracy.toFixed(4)} |\n`;
+              
+              if (result.notes) {
+                comment += `\n**Notes:** ${result.notes}\n`;
+              }
+              
+              comment += '\n---\n\n';
+              comment += '### 📋 Next Steps\n\n';
+              comment += '1. ✅ Your submission has been validated\n';
+              comment += '2. ⏳ Organizers will review and approve\n';
+              comment += '3. 🏆 Your score will be added to the leaderboard\n';
+              comment += '4. 🔒 This PR will be closed (NOT merged) to protect your predictions\n\n';
+              comment += '> **Note:** Predictions are kept private. Only your score and metadata will be public.\n';
+              
+            } else {
+              comment += '### ❌ Submission Invalid\n\n';
+              comment += '**Errors:**\n```\n' + result.errors + '\n```\n\n';
+              comment += '### 🔧 How to Fix\n\n';
+              comment += '1. Read the error message above carefully\n';
+              comment += '2. Fix the issues in your submission files\n';
+              comment += '3. Commit and push the fixes to this PR branch\n';
+              comment += '4. The evaluation will run automatically again\n\n';
+              comment += 'Common issues:\n';
+              comment += '- Wrong number of predictions\n';
+              comment += '- y_pred values outside [0, 1] range\n';
+              comment += '- Missing or duplicate IDs\n';
+              comment += '- Wrong column names in CSV\n';
+            }
+            
+            // Post comment
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+            
+      - name: Clean up secrets
+        if: always()
+        run: |
+          rm -f test_labels.csv evaluation_result.json
+          echo "🧹 Cleaned up temporary files"
