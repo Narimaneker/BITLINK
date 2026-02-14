@@ -7,7 +7,7 @@ on:
     types: [opened, synchronize, reopened]
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
 
 jobs:
@@ -19,6 +19,7 @@ jobs:
         uses: actions/checkout@v3
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
           
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -29,37 +30,60 @@ jobs:
         run: |
           pip install pandas numpy scikit-learn
           
-      - name: Prepare test labels 
-        
+      - name: Decode private test labels
+        env:
+          TEST_LABELS_CSV: ${{ secrets.TEST_LABELS_CSV }}
         run: |
-          echo "${{ secrets.TEST_LABELS }}" > test_labels.csv
+          echo "$TEST_LABELS_CSV" > test_labels.csv
+          echo "✅ Test labels decoded ($(wc -l < test_labels.csv) lines)"
           
       - name: Evaluate submission
         id: evaluate
         run: |
           python competition/evaluate_pr.py
           
-      - name: Post results as comment
+      - name: Read evaluation result
+        id: result
+        run: |
+          if [ -f evaluation_result.json ]; then
+            VALID=$(python -c "import json; print(json.load(open('evaluation_result.json'))['valid'])")
+            echo "valid=$VALID" >> $GITHUB_OUTPUT
+            
+            if [ "$VALID" = "True" ]; then
+              TEAM=$(python -c "import json; print(json.load(open('evaluation_result.json'))['team'])")
+              RUN_ID=$(python -c "import json; print(json.load(open('evaluation_result.json'))['run_id'])")
+              SCORE=$(python -c "import json; print(json.load(open('evaluation_result.json'))['roc_auc'])")
+              MODEL=$(python -c "import json; print(json.load(open('evaluation_result.json'))['model'])")
+              LLM=$(python -c "import json; print(json.load(open('evaluation_result.json'))['llm_name'])")
+              NOTES=$(python -c "import json; print(json.load(open('evaluation_result.json'))['notes'])")
+              
+              echo "team=$TEAM" >> $GITHUB_OUTPUT
+              echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+              echo "score=$SCORE" >> $GITHUB_OUTPUT
+              echo "model=$MODEL" >> $GITHUB_OUTPUT
+              echo "llm_name=$LLM" >> $GITHUB_OUTPUT
+              echo "notes=$NOTES" >> $GITHUB_OUTPUT
+            fi
+          fi
+          
+      - name: Post evaluation results as comment
         uses: actions/github-script@v7
         if: always()
         with:
           script: |
             const fs = require('fs');
             
-            // Read evaluation result
             let result;
             try {
               const resultData = fs.readFileSync('evaluation_result.json', 'utf8');
               result = JSON.parse(resultData);
             } catch (error) {
-              // If evaluation crashed before creating result file
               result = {
                 valid: false,
                 errors: 'Evaluation failed to complete. Check workflow logs.'
               };
             }
             
-            // Build comment
             let comment = '## 🤖 Submission Evaluation Results\n\n';
             
             if (result.valid) {
@@ -78,11 +102,10 @@ jobs:
               }
               
               comment += '\n---\n\n';
-              comment += '### 📋 Next Steps\n\n';
-              comment += '1. ✅ Your submission has been validated\n';
-              comment += '2. ⏳ Organizers will review and approve\n';
-              comment += '3. 🏆 Your score will be added to the leaderboard\n';
-              comment += '4. 🔒 This PR will be closed (NOT merged) to protect your predictions\n\n';
+              comment += '### 🎉 Automatic Processing\n\n';
+              comment += '✅ Your submission has been validated\n';
+              comment += '⚡ Your score is being added to the leaderboard automatically\n';
+              comment += '🔒 This PR will be closed automatically to protect your predictions\n\n';
               comment += '> **Note:** Predictions are kept private. Only your score and metadata will be public.\n';
               
             } else {
@@ -100,12 +123,64 @@ jobs:
               comment += '- Wrong column names in CSV\n';
             }
             
-            // Post comment
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: comment
+            });
+            
+      - name: Checkout main branch for leaderboard update
+        if: steps.result.outputs.valid == 'True'
+        run: |
+          git fetch origin main
+          git checkout main
+          
+      - name: Update leaderboard automatically
+        if: steps.result.outputs.valid == 'True'
+        env:
+          TEAM: ${{ steps.result.outputs.team }}
+          RUN_ID: ${{ steps.result.outputs.run_id }}
+          SCORE: ${{ steps.result.outputs.score }}
+          MODEL: ${{ steps.result.outputs.model }}
+          LLM_NAME: ${{ steps.result.outputs.llm_name }}
+          NOTES: ${{ steps.result.outputs.notes }}
+        run: |
+          python scripts/auto_update_leaderboard.py
+          
+      - name: Commit and push leaderboard
+        if: steps.result.outputs.valid == 'True'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add leaderboard/
+          git commit -m "Add ${{ steps.result.outputs.team }}/${{ steps.result.outputs.run_id }} to leaderboard (score: ${{ steps.result.outputs.score }})"
+          git push origin main
+          
+      - name: Close PR automatically
+        if: steps.result.outputs.valid == 'True'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const team = '${{ steps.result.outputs.team }}';
+            const score = '${{ steps.result.outputs.score }}';
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## ✅ Submission Approved & Processed!\n\n` +
+                    `Your score (**${score}**) has been automatically added to the leaderboard!\n\n` +
+                    `🏆 View the leaderboard: [leaderboard.md](../blob/main/leaderboard/leaderboard.md)\n\n` +
+                    `This PR is now being closed to keep predictions private.\n\n` +
+                    `Thank you for participating! Feel free to submit improvements with a new run_id.`
+            });
+            
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              state: 'closed'
             });
             
       - name: Clean up secrets
