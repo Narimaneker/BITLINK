@@ -32,7 +32,7 @@ jobs:
           
       - name: Decode private test labels
         env:
-          TEST_LABELS_CSV: ${{ secrets.TEST_LABELS_CSV }}
+          TEST_LABELS_CSV: ${{ secrets.TEST_LABELS }}
         run: |
           echo "$TEST_LABELS_CSV" > test_labels.csv
           echo "✅ Test labels decoded ($(wc -l < test_labels.csv) lines)"
