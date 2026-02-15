@@ -1,2 +1,1 @@
 timestamp_utc,team,model,score,notes
-2026-02-14T22:28:51.428775Z,test_team,baseline,0.5224545454545455,run_001 | LLM: none | Random baseline predictions for testing the submission system
