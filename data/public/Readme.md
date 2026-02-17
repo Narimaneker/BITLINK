@@ -123,8 +123,8 @@ Negative samples were generated separately for:
 
 To reflect real-world graph sparsity, the test set is intentionally imbalanced:
 
-- **600 positive edges**
-- **1100 negative edges**
+- **990 positive edges**
+- **2500 negative edges**
 
 Total test edges: **1700**
 
