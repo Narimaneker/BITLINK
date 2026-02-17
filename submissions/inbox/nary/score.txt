@@ -1,0 +1,9 @@
+╔══════════════════════════════════════╗
+║     BITLINK Evaluation Result        ║
+╠══════════════════════════════════════╣
+║ Team   : nary
+║ Status : Failed
+║ Error  : 'id'
+║ Time   : Tue Feb 17 13:39:31 UTC 2026
+╚══════════════════════════════════════╝
+Please fix the errors and resubmit.
