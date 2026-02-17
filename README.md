@@ -163,7 +163,14 @@ git add submissions/inbox/YOUR_TEAM_NAME/
 git commit -m "Submission: YOUR_TEAM_NAME"
 git push origin YOUR_TEAM_NAME
 ```
+⚠️ Important: Delete predictions.csv before committing! 
+Only the encrypted .enc file should be submitted.
 
+# Windows:
+del submissions\inbox\YOUR_TEAM_NAME\predictions.csv
+
+# Mac/Linux:
+rm submissions/inbox/YOUR_TEAM_NAME/predictions.csv
 Then go to GitHub → open a **Pull Request** from your fork to the main repository.
 
 > ⚠️ **Do NOT merge the PR yourself.** The system handles everything automatically.
