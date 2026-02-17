@@ -1,0 +1,243 @@
+name: Evaluate Encrypted Submission
+
+on:
+  push:
+    paths:
+      - 'submissions/inbox/**/*.enc'
+    branches-ignore:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+
+    steps:
+      # SECURITY: Checkout evaluation scripts from YOUR main branch ONLY
+      - name: Checkout evaluation code from main
+        uses: actions/checkout@v3
+        with:
+          ref: main
+          path: evaluation-code
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Checkout the pushed branch (submission only)
+      - name: Checkout submission branch
+        uses: actions/checkout@v3
+        with:
+          path: participant-submission
+          sparse-checkout: |
+            submissions/inbox/
+          sparse-checkout-cone-mode: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install pandas numpy scikit-learn cryptography
+
+      # SECURITY: Write private key from GitHub Secret
+      - name: Prepare private key
+        env:
+          PRIVATE_KEY: ${{ secrets.ENCRYPTION_PRIVATE_KEY }}
+        run: |
+          echo "$PRIVATE_KEY" > /tmp/private_key.pem
+          chmod 600 /tmp/private_key.pem
+
+      # Find .enc file and read metadata.json
+      - name: Find submission and read metadata
+        id: submission
+        run: |
+          # Find .enc file in submissions/inbox/*/*/
+          ENC_FILE=$(find participant-submission/submissions/inbox -name "*.enc" | head -1)
+
+          if [ -z "$ENC_FILE" ]; then
+            echo "valid=false" >> $GITHUB_OUTPUT
+            echo "error=No .enc file found in submissions/inbox/" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "📁 Found: $ENC_FILE"
+
+          # Extract team and run_id from path
+          # Path: submissions/inbox/TEAM/RUN_ID/predictions.csv.enc
+          TEAM=$(echo "$ENC_FILE" | awk -F'/' '{print $(NF-2)}')
+          RUN_ID=$(echo "$ENC_FILE" | awk -F'/' '{print $(NF-1)}')
+
+          echo "team=$TEAM" >> $GITHUB_OUTPUT
+          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+          echo "enc_file=$ENC_FILE" >> $GITHUB_OUTPUT
+          echo "👤 Team: $TEAM"
+          echo "🔢 Run: $RUN_ID"
+
+          # Read metadata.json from same folder
+          META_FILE=$(dirname "$ENC_FILE")/metadata.json
+
+          if [ -f "$META_FILE" ]; then
+            MODEL=$(python -c "import json; d=json.load(open('$META_FILE')); print(d.get('model','unknown'))")
+            LLM=$(python -c "import json; d=json.load(open('$META_FILE')); print(d.get('llm_name','none'))")
+            NOTES=$(python -c "import json; d=json.load(open('$META_FILE')); print(d.get('notes',''))")
+            echo "model=$MODEL" >> $GITHUB_OUTPUT
+            echo "llm_name=$LLM" >> $GITHUB_OUTPUT
+            echo "notes=$NOTES" >> $GITHUB_OUTPUT
+            echo "✅ Metadata loaded: model=$MODEL, llm=$LLM"
+          else
+            echo "model=unknown" >> $GITHUB_OUTPUT
+            echo "llm_name=none" >> $GITHUB_OUTPUT
+            echo "notes=" >> $GITHUB_OUTPUT
+            echo "⚠️ No metadata.json found, using defaults"
+          fi
+
+      # Decrypt the .enc file
+      - name: Decrypt submission
+        id: decrypt
+        if: steps.submission.outputs.enc_file != ''
+        run: |
+          python evaluation-code/encryption/decrypt.py \
+            "${{ steps.submission.outputs.enc_file }}" \
+            /tmp/private_key.pem \
+            /tmp/decrypted_predictions.csv
+
+          if [ $? -eq 0 ]; then
+            echo "decrypted=true" >> $GITHUB_OUTPUT
+            echo "✅ Decryption successful"
+          else
+            echo "decrypted=false" >> $GITHUB_OUTPUT
+            echo "error=Decryption failed. Did you use the correct public_key.pem?" >> $GITHUB_OUTPUT
+          fi
+
+      # Copy decrypted predictions into evaluation environment
+      - name: Prepare evaluation environment
+        if: steps.decrypt.outputs.decrypted == 'true'
+        run: |
+          TEAM="${{ steps.submission.outputs.team }}"
+          RUN_ID="${{ steps.submission.outputs.run_id }}"
+          mkdir -p evaluation-code/submissions/inbox/$TEAM/$RUN_ID
+          cp /tmp/decrypted_predictions.csv evaluation-code/submissions/inbox/$TEAM/$RUN_ID/predictions.csv
+
+          # Also copy metadata.json
+          META_FILE="participant-submission/submissions/inbox/$TEAM/$RUN_ID/metadata.json"
+          if [ -f "$META_FILE" ]; then
+            cp "$META_FILE" evaluation-code/submissions/inbox/$TEAM/$RUN_ID/metadata.json
+          fi
+
+      # Write test labels from GitHub Secret
+      - name: Prepare test labels
+        if: steps.decrypt.outputs.decrypted == 'true'
+        env:
+          TEST_LABELS_CSV: ${{ secrets.TEST_LABELS_CSV }}
+        run: |
+          echo "$TEST_LABELS_CSV" > evaluation-code/test_labels.csv
+
+      # Run evaluation
+      - name: Evaluate submission
+        id: evaluate
+        if: steps.decrypt.outputs.decrypted == 'true'
+        working-directory: evaluation-code
+        run: |
+          python competition/evaluate_pr.py
+
+      # Read result
+      - name: Read result
+        id: result
+        if: steps.decrypt.outputs.decrypted == 'true'
+        working-directory: evaluation-code
+        run: |
+          if [ -f evaluation_result.json ]; then
+            VALID=$(python -c "import json; print(json.load(open('evaluation_result.json'))['valid'])")
+            echo "valid=$VALID" >> $GITHUB_OUTPUT
+
+            if [ "$VALID" = "True" ]; then
+              SCORE=$(python -c "import json; print(json.load(open('evaluation_result.json'))['roc_auc'])")
+              echo "score=$SCORE" >> $GITHUB_OUTPUT
+            else
+              ERRORS=$(python -c "import json; print(json.load(open('evaluation_result.json')).get('errors','Unknown error'))")
+              echo "errors=$ERRORS" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      # Update leaderboard automatically
+      - name: Update leaderboard
+        if: steps.result.outputs.valid == 'True'
+        working-directory: evaluation-code
+        env:
+          TEAM: ${{ steps.submission.outputs.team }}
+          RUN_ID: ${{ steps.submission.outputs.run_id }}
+          SCORE: ${{ steps.result.outputs.score }}
+          MODEL: ${{ steps.submission.outputs.model }}
+          LLM_NAME: ${{ steps.submission.outputs.llm_name }}
+          NOTES: ${{ steps.submission.outputs.notes }}
+        run: |
+          python scripts/auto_update_leaderboard.py
+
+      - name: Commit and push leaderboard
+        if: steps.result.outputs.valid == 'True'
+        working-directory: evaluation-code
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add leaderboard/
+          git diff --staged --quiet || git commit -m "Add ${{ steps.submission.outputs.team }}/${{ steps.submission.outputs.run_id }} to leaderboard (score: ${{ steps.result.outputs.score }})"
+          git push origin main
+
+      # Write score result back to participant's branch
+      - name: Write score back to branch
+        working-directory: participant-submission
+        run: |
+          TEAM="${{ steps.submission.outputs.team }}"
+          RUN_ID="${{ steps.submission.outputs.run_id }}"
+          VALID="${{ steps.result.outputs.valid }}"
+          SCORE="${{ steps.result.outputs.score }}"
+          ERRORS="${{ steps.decrypt.outputs.error }}${{ steps.result.outputs.errors }}"
+
+          mkdir -p submissions/inbox/$TEAM/$RUN_ID
+
+          if [ "$VALID" = "True" ]; then
+            cat > submissions/inbox/$TEAM/$RUN_ID/score.txt << EOF
+          ╔══════════════════════════════════════╗
+          ║     BITLINK Evaluation Result        ║
+          ╠══════════════════════════════════════╣
+          ║ Team   : $TEAM
+          ║ Run    : $RUN_ID
+          ║ Score  : $SCORE (ROC-AUC)
+          ║ Status : Valid
+          ║ Time   : $(date -u)
+          ╚══════════════════════════════════════╝
+          Your score has been added to the leaderboard!
+          View: https://github.com/Narimaneker/BITLINK/blob/main/leaderboard/leaderboard.md
+          EOF
+          else
+            cat > submissions/inbox/$TEAM/$RUN_ID/score.txt << EOF
+          ╔══════════════════════════════════════╗
+          ║     BITLINK Evaluation Result        ║
+          ╠══════════════════════════════════════╣
+          ║ Team   : $TEAM
+          ║ Run    : $RUN_ID
+          ║ Status : Failed
+          ║ Error  : $ERRORS
+          ║ Time   : $(date -u)
+          ╚══════════════════════════════════════╝
+          Please fix the errors and resubmit.
+          EOF
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add submissions/inbox/$TEAM/$RUN_ID/score.txt
+          git diff --staged --quiet || git commit -m "Score: $TEAM/$RUN_ID"
+          git push
+
+      # SECURITY: Clean up all sensitive files
+      - name: Clean up
+        if: always()
+        run: |
+          rm -f /tmp/private_key.pem
+          rm -f /tmp/decrypted_predictions.csv
+          rm -f evaluation-code/test_labels.csv
+          rm -f evaluation-code/evaluation_result.json
+          echo "Cleaned up"

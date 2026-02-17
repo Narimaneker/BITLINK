@@ -1,0 +1,25 @@
+# Handle line endings automatically
+* text=auto
+
+# Force Unix line endings (LF) for these files - CRITICAL for crypto files!
+*.pem text eol=lf
+*.key text eol=lf
+
+# Encrypted files treated as binary - no conversion!
+*.enc binary
+
+# Scripts always LF
+*.py text eol=lf
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Data files
+*.csv text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+
+# Binary files - no line ending conversion
+*.png binary
+*.jpg binary
+*.zip binary
