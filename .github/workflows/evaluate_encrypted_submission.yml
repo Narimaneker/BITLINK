@@ -14,6 +14,33 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # SECURITY: Validate PR only touches submissions folder
+      - name: Checkout PR for validation
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          path: pr-check
+
+      - name: Validate PR only modifies submissions
+        run: |
+          cd pr-check
+          git fetch origin main
+          CHANGED=$(git diff --name-only origin/main HEAD)
+          echo "Changed files:"
+          echo "$CHANGED"
+
+          INVALID=$(echo "$CHANGED" | grep -v "^submissions/inbox/" || true)
+
+          if [ ! -z "$INVALID" ]; then
+            echo "❌ ERROR: PR modifies protected files:"
+            echo "$INVALID"
+            echo ""
+            echo "You are only allowed to modify files inside submissions/inbox/"
+            exit 1
+          fi
+          echo "✅ Validation passed - only submission files modified"
+
       # SECURITY: Checkout evaluation scripts from YOUR main branch ONLY
       - name: Checkout evaluation code from main
         uses: actions/checkout@v3
@@ -64,16 +91,13 @@ jobs:
 
           echo "📁 Found: $ENC_FILE"
 
-          # Extract team and run_id from path
-          # Path: submissions/inbox/TEAM/RUN_ID/predictions.csv.enc
-          TEAM=$(echo "$ENC_FILE" | awk -F'/' '{print $(NF-2)}')
-          RUN_ID=$(echo "$ENC_FILE" | awk -F'/' '{print $(NF-1)}')
+          # Extract team from path
+          # Path: submissions/inbox/TEAM_NAME/predictions.csv.enc
+          TEAM=$(echo "$ENC_FILE" | awk -F'/' '{print $(NF-1)}')
 
           echo "team=$TEAM" >> $GITHUB_OUTPUT
-          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
           echo "enc_file=$ENC_FILE" >> $GITHUB_OUTPUT
           echo "👤 Team: $TEAM"
-          echo "🔢 Run: $RUN_ID"
 
           # Read metadata.json from same folder
           META_FILE=$(dirname "$ENC_FILE")/metadata.json
@@ -116,15 +140,16 @@ jobs:
         if: steps.decrypt.outputs.decrypted == 'true'
         run: |
           TEAM="${{ steps.submission.outputs.team }}"
-          RUN_ID="${{ steps.submission.outputs.run_id }}"
-          mkdir -p evaluation-code/submissions/inbox/$TEAM/$RUN_ID
-          cp /tmp/decrypted_predictions.csv evaluation-code/submissions/inbox/$TEAM/$RUN_ID/predictions.csv
+          mkdir -p evaluation-code/submissions/inbox/$TEAM
+          cp /tmp/decrypted_predictions.csv evaluation-code/submissions/inbox/$TEAM/predictions.csv
 
           # Also copy metadata.json
-          META_FILE="participant-submission/submissions/inbox/$TEAM/$RUN_ID/metadata.json"
+          META_FILE="participant-submission/submissions/inbox/$TEAM/metadata.json"
           if [ -f "$META_FILE" ]; then
-            cp "$META_FILE" evaluation-code/submissions/inbox/$TEAM/$RUN_ID/metadata.json
+            cp "$META_FILE" evaluation-code/submissions/inbox/$TEAM/metadata.json
           fi
+
+      # DEBUG: Inspect decrypted file
       - name: Debug decrypted file
         if: steps.decrypt.outputs.decrypted == 'true'
         run: |
@@ -134,11 +159,12 @@ jobs:
           head -5 /tmp/decrypted_predictions.csv
           echo "=== File encoding ==="
           file /tmp/decrypted_predictions.csv
+
       # Write test labels from GitHub Secret
       - name: Prepare test labels
         if: steps.decrypt.outputs.decrypted == 'true'
         env:
-          TEST_LABELS_CSV: ${{ secrets.TEST_LABELS }}
+          TEST_LABELS_CSV: ${{ secrets.TEST_LABELS_CSV }}
         run: |
           echo "$TEST_LABELS_CSV" > evaluation-code/test_labels.csv
 
@@ -175,7 +201,7 @@ jobs:
         working-directory: evaluation-code
         env:
           TEAM: ${{ steps.submission.outputs.team }}
-          RUN_ID: ${{ steps.submission.outputs.run_id }}
+          RUN_ID: run_001
           SCORE: ${{ steps.result.outputs.score }}
           MODEL: ${{ steps.submission.outputs.model }}
           LLM_NAME: ${{ steps.submission.outputs.llm_name }}
@@ -198,20 +224,18 @@ jobs:
         working-directory: participant-submission
         run: |
           TEAM="${{ steps.submission.outputs.team }}"
-          RUN_ID="${{ steps.submission.outputs.run_id }}"
           VALID="${{ steps.result.outputs.valid }}"
           SCORE="${{ steps.result.outputs.score }}"
           ERRORS="${{ steps.decrypt.outputs.error }}${{ steps.result.outputs.errors }}"
 
-          mkdir -p submissions/scores/$TEAM/
+          mkdir -p submissions/inbox/$TEAM
 
           if [ "$VALID" = "True" ]; then
-            cat > submissions/scores/$TEAM/score.txt << EOF
+            cat > submissions/inbox/$TEAM/score.txt << EOF
           ╔══════════════════════════════════════╗
           ║     BITLINK Evaluation Result        ║
           ╠══════════════════════════════════════╣
           ║ Team   : $TEAM
-          ║ Run    : $RUN_ID
           ║ Score  : $SCORE (ROC-AUC)
           ║ Status : Valid
           ║ Time   : $(date -u)
@@ -220,12 +244,11 @@ jobs:
           View: https://github.com/Narimaneker/BITLINK/blob/main/leaderboard/leaderboard.md
           EOF
           else
-            cat > submissions/inbox/scores/$TEAM/score.txt << EOF
+            cat > submissions/inbox/$TEAM/score.txt << EOF
           ╔══════════════════════════════════════╗
           ║     BITLINK Evaluation Result        ║
           ╠══════════════════════════════════════╣
           ║ Team   : $TEAM
-          ║ Run    : $RUN_ID
           ║ Status : Failed
           ║ Error  : $ERRORS
           ║ Time   : $(date -u)
@@ -236,7 +259,7 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add submissions/inbox/scores/$TEAM/score.txt
+          git add submissions/inbox/$TEAM/score.txt
           git diff --staged --quiet || git commit -m "Score: $TEAM"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
 
