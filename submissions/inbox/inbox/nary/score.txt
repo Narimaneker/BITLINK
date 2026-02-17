@@ -1,0 +1,10 @@
+╔══════════════════════════════════════╗
+║     BITLINK Evaluation Result        ║
+╠══════════════════════════════════════╣
+║ Team   : inbox
+║ Run    : nary
+║ Status : Failed
+║ Error  : No predictions.csv found in submissions/inbox/TEAM_NAME/. Make sure the decrypted file was copied to the correct path.
+║ Time   : Tue Feb 17 12:27:43 UTC 2026
+╚══════════════════════════════════════╝
+Please fix the errors and resubmit.
