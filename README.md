@@ -166,10 +166,10 @@ git push origin YOUR_TEAM_NAME
 ⚠️ Important: Delete predictions.csv before committing! 
 Only the encrypted .enc file should be submitted.
 
-# Windows:
+#### Windows:
 del submissions\inbox\YOUR_TEAM_NAME\predictions.csv
 
-# Mac/Linux:
+#### Mac/Linux:
 rm submissions/inbox/YOUR_TEAM_NAME/predictions.csv
 Then go to GitHub → open a **Pull Request** from your fork to the main repository.
 
