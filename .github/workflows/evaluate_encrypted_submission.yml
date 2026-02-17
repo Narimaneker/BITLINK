@@ -138,7 +138,7 @@ jobs:
       - name: Prepare test labels
         if: steps.decrypt.outputs.decrypted == 'true'
         env:
-          TEST_LABELS_CSV: ${{ secrets.TEST_LABELS_CSV }}
+          TEST_LABELS_CSV: ${{ secrets.TEST_LABELS }}
         run: |
           echo "$TEST_LABELS_CSV" > evaluation-code/test_labels.csv
 
