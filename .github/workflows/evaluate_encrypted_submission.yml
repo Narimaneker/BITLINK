@@ -125,7 +125,15 @@ jobs:
           if [ -f "$META_FILE" ]; then
             cp "$META_FILE" evaluation-code/submissions/inbox/$TEAM/$RUN_ID/metadata.json
           fi
-
+      - name: Debug decrypted file
+        if: steps.decrypt.outputs.decrypted == 'true'
+        run: |
+          echo "=== File size ==="
+          wc -c /tmp/decrypted_predictions.csv
+          echo "=== First 5 lines ==="
+          head -5 /tmp/decrypted_predictions.csv
+          echo "=== File encoding ==="
+          file /tmp/decrypted_predictions.csv
       # Write test labels from GitHub Secret
       - name: Prepare test labels
         if: steps.decrypt.outputs.decrypted == 'true'
