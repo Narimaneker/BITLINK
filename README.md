@@ -1,17 +1,17 @@
 # BITLINK - Bitcoin Transaction Network
 
 This repository provides a **secure, reproducible template** for running a
-Graph Neural Network (GNN) link prediction competition on the **Elliptic Bitcoin Dataset** 
+Graph Neural Network (GNN) link prediction competition on the **Elliptic Bitcoin Dataset**
 that supports **humans and LLMs** competing on equal footing.
 
 The design intentionally **does not execute participant code**. Instead,
-participants submit **predictions only**, which are automatically evaluated
-and ranked on a public leaderboard using GitHub Actions.
+participants submit **encrypted predictions only**, which are automatically decrypted,
+evaluated, and ranked on a public leaderboard using GitHub Actions.
 
 This makes the competition:
-- Safe (no untrusted code execution)
-- Fully reproducible
-- Suitable for human-vs-LLM evaluation studies
+- 🔒 **Secure** — predictions are encrypted, test labels are never exposed
+- ⚙️ **Fully automated** — no manual intervention required
+- ⚖️ **Fair** — suitable for human-vs-LLM evaluation studies
 
 ---
 
@@ -20,10 +20,10 @@ This makes the competition:
 **Task:** Link prediction on Bitcoin transaction graph  
 **Dataset:** Elliptic Bitcoin Dataset (from HuggingFace: rexaro/elliptic-bitcoin-dataset)  
 **Input:** Public graph structure and node features from Bitcoin transactions  
-**Output:** Binary predictions for existence/non-existence of links between node pairs  
-**Metric:** Accuracy (binary classification)
+**Output:** Probability predictions (0.0 to 1.0) for existence of links between node pairs  
+**Metric:** ROC-AUC  
 
-Participants train any GNN or non-GNN model *offline* and submit binary predictions
+Participants train any GNN or non-GNN model *offline* and submit **encrypted probability predictions**
 for the test node pairs.
 
 ---
@@ -35,19 +35,15 @@ for the test node pairs.
 The Elliptic Bitcoin Dataset maps Bitcoin transactions to real entities and includes:
 - **Nodes:** Bitcoin transactions
 - **Edges:** Flow of Bitcoin between transactions
-- **Node Features:** Transaction metadata (time step, local features, aggregate features)
+- **Node Features:** Only first 7 local features retained (out of 166 original)
 - **Task:** Predict whether a link (transaction flow) exists between pairs of nodes
 
-**Data Files:**
-- `train_features.csv` / `val_features.csv` / `test_features.csv`: Node feature matrices
-- `train_edges.csv` / `val_edges.csv` / `test_edges.csv`: Graph edge lists
-- Training and validation data include both positive (existing) and negative (non-existing) link examples
-- Test set contains node pairs for which you must predict link existence probability
+**Splits:**
+- **Training set:** Time steps ≤ 15 — for model training with known labels
+- **Validation set:** Time step 20 — for hyperparameter tuning
+- **Test set:** Time step 24 — for final evaluation (labels hidden)
 
-The dataset has been preprocessed and split into:
-- **Training set:** For model training with known link labels
-- **Validation set:** For hyperparameter tuning and model selection
-- **Test set:** For final evaluation (labels hidden)
+**Test Set Composition:** 3,490 node pairs — 990 positive edges (28%), 2,500 negative edges (72%)
 
 ---
 
@@ -56,111 +52,191 @@ The dataset has been preprocessed and split into:
 ```
 .
 ├── data/
-│   ├── public/
-│   │   ├── train_features.csv       # Node features for training graph
-│   │   ├── train_edges.csv          # Training graph edges
-│   │   ├── val_features.csv         # Node features for validation graph
-│   │   ├── val_edges.csv            # Validation graph edges
-│   │   ├── test_features.csv        # Node features for test graph
-│   │   ├── test_edges.csv           # Test graph edges (background)
-│   │   └── sample_submission.csv    # Submission format example
-│   └── private/
-│       └── test_labels.csv          # never committed (used only in CI)
+│   └── public/
+│       ├── train/
+│       │   ├── train_features.csv       # Node features for training graph
+│       │   └── train_edges.csv          # Training graph edges with labels
+│       ├── val/
+│       │   ├── val_features.csv         # Node features for validation graph
+│       │   └── val_edges.csv            # Validation graph edges with labels
+│       └── test/
+│           ├── test_features.csv        # Node features for test graph
+│           └── test_edges.csv           # Test node pairs (no labels)
 ├── competition/
 │   ├── config.yaml
+│   ├── evaluate_pr.py
 │   ├── validate_submission.py
 │   ├── evaluate.py
 │   └── metrics.py
+├── encryption/
+│   ├── encrypt.py                       # Participants use this to encrypt
+│   ├── decrypt.py                       # Used by GitHub Actions only
+│   └── public_key.pem                   # Public key for encryption
+├── scripts/
+│   └── auto_update_leaderboard.py
 ├── submissions/
-│   ├── README.md
-│   └── inbox/
+│   ├── sample_submission.csv            # Example predictions format
+│   └── inbox/                           # One folder per team
+│       └── YOUR_TEAM_NAME/
+│           ├── predictions.csv.enc      # Encrypted predictions
+│           ├── metadata.json            # Team info
+│           └── score.txt                # Auto-written after evaluation
 ├── leaderboard/
 │   ├── leaderboard.csv
 │   └── leaderboard.md
-└── .github/workflows/
-    ├── score_submission.yml
-    └── publish_leaderboard.yml
+├── .github/
+│   └── workflows/
+│       └── evaluate_encrypted_submission.yml
+├── .gitattributes
+├── .gitignore
+└── README.md
 ```
 
 ---
 
 ## 4. Submission Format
 
-Participants submit a **single CSV file**:
+Generate predictions and save as `predictions.csv`:
 
-**predictions.csv**
-```
+```csv
 id,y_pred
-0,1
-1,0
-2,1
+0,0.92
+1,0.13
+2,0.78
 ...
 ```
 
-Rules:
-- `id` is the row index (0, 1, 2, ...) corresponding to test samples
-- One row per test sample
-- `y_pred` must be either **0** (no link) or **1** (link exists)
+**Rules:**
+- `id`: Sequential integers from 0 to 3489
+- `y_pred`: Probability between **0.0 and 1.0** (not binary!)
 - No missing or duplicate IDs
-- IDs must be sequential starting from 0
+- Exactly 3,490 predictions required
 
-A sample is provided in:
-```
-data/public/sample_submission.csv
-```
+See `submissions/sample_submission.csv` for a complete example.
 
 ---
 
 ## 5. How to Submit
 
-1. Fork this repository
-2. Create a new folder:
+### Step 1 — Install dependency
+```bash
+pip install cryptography
 ```
-submissions/inbox/<team_name>/<run_id>/
-```
-3. Add:
-   - `predictions.csv`
-   - `metadata.json`
 
-Example `metadata.json`:
+### Step 2 — Fork & Clone
+```bash
+git clone https://github.com/YOUR_USERNAME/BITLINK.git
+cd BITLINK
+```
+
+### Step 3 — Create your submission folder
+```bash
+mkdir -p submissions/inbox/YOUR_TEAM_NAME
+```
+
+### Step 4 — Encrypt your predictions
+```bash
+python encryption/encrypt.py \
+    predictions.csv \
+    encryption/public_key.pem \
+    submissions/inbox/YOUR_TEAM_NAME/predictions.csv.enc
+```
+
+### Step 5 — Create metadata.json
+Save to `submissions/inbox/YOUR_TEAM_NAME/metadata.json`:
 ```json
 {
-  "team": "example_team",
-  "model": "llm-only",
-  "llm_name": "gpt-x",
-  "notes": "Graph attention network for Bitcoin transaction link prediction"
+  "team": "YOUR_TEAM_NAME",
+  "model": "gnn",
+  "llm_name": "none",
+  "notes": "Brief description of your approach"
 }
 ```
 
-4. Open a Pull Request to `main`
+**Supported model values:** `gnn`, `llm`, `hybrid`, `baseline`  
+**Supported llm_name values:** `none`, `gpt-4`, `gpt-3.5-turbo`, `claude-3-opus`, `claude-3-sonnet`, etc.
 
-The PR will be **automatically scored** and the result posted as a comment.
+### Step 6 — Push and open a Pull Request
+```bash
+git checkout -b YOUR_TEAM_NAME
+git add submissions/inbox/YOUR_TEAM_NAME/
+git commit -m "Submission: YOUR_TEAM_NAME"
+git push origin YOUR_TEAM_NAME
+```
+
+Then go to GitHub → open a **Pull Request** from your fork to the main repository.
+
+> ⚠️ **Do NOT merge the PR yourself.** The system handles everything automatically.
+
+### Step 7 — Check your score
+After **2-5 minutes**, a `score.txt` is automatically written to your submission folder:
+```
+submissions/inbox/YOUR_TEAM_NAME/score.txt
+```
+
+```
+╔══════════════════════════════════════╗
+║     BITLINK Evaluation Result        ║
+╠══════════════════════════════════════╣
+║ Team   : YOUR_TEAM_NAME
+║ Score  : 0.8756 (ROC-AUC)
+║ Status : Valid
+╚══════════════════════════════════════╝
+Your score has been added to the leaderboard!
+```
+
+> The PR will be **automatically closed** after evaluation. You do not need to do anything else.
 
 ---
 
 ## 6. Leaderboard
 
-After a PR is merged, the submission is added to:
-- `leaderboard/leaderboard.csv`
-- `leaderboard/leaderboard.md`
+Scores are added automatically after each valid submission:
+- `leaderboard/leaderboard.csv` — raw scores database
+- `leaderboard/leaderboard.md` — formatted public rankings
 
-Rankings are sorted by **descending score**.
+Rankings are sorted by **descending ROC-AUC score**.
+
+**One submission per team.** Each team name must be unique.
 
 ---
 
-## 7. Rules
+## 7. Security
+
+This competition uses **RSA hybrid encryption** to keep predictions private:
+
+```
+Your Machine                      GitHub Actions (Private)
+──────────────                    ────────────────────────
+predictions.csv
+    ↓ encrypt with public_key.pem
+predictions.csv.enc ── push ───►  decrypt with private key (GitHub Secret)
+(unreadable!)                          ↓ evaluate vs hidden test labels
+                                       ↓ delete predictions immediately
+                                  score → leaderboard ✅
+```
+
+- ✅ Test labels stored as GitHub Secrets — never in the repository
+- ✅ Private key stored as GitHub Secrets — never exposed
+- ✅ Predictions decrypted only in GitHub Actions — deleted after evaluation
+- ✅ No code execution — predictions only
+- ✅ Evaluation scripts fetched from `main` branch — cannot be tampered with
+
+---
+
+## 8. Rules
 
 - No external or private data
 - No manual labeling of test data
-- No modification of evaluation scripts
+- No modification of evaluation or encryption scripts
 - Unlimited offline training is allowed
-- Only predictions are submitted
+- Only encrypted predictions are submitted
 
 Violations may result in disqualification.
 
 ---
 
-## 8. Human vs LLM Studies
+## 9. Human vs LLM Studies
 
 To use this competition for research:
 - Fix a time budget (e.g., 2 hours)
@@ -173,7 +249,7 @@ To use this competition for research:
 
 ---
 
-## 9. Citation
+## 10. Citation
 
 If you use this template or the Elliptic Bitcoin Dataset in academic work, please cite:
 
@@ -191,22 +267,10 @@ If you use this template or the Elliptic Bitcoin Dataset in academic work, pleas
   pages={1954--1964},
   year={2019}
 }
-
 ```
 
-
-
 ---
 
-## 10. License
+## 11. License
 
 MIT License.
-
----
-
-## 11. Interactive Leaderboard (GitHub Pages)
-
-This template includes an interactive leaderboard page inspired by modern benchmark sites.
-
-**Enable GitHub Pages** (Settings → Pages) and set the source to the `main` branch `/docs` folder.
-Then open `https://<your-org>.github.io/<repo>/leaderboard.html`.
