@@ -126,7 +126,7 @@ To reflect real-world graph sparsity, the test set is intentionally imbalanced:
 - **990 positive edges**
 - **2500 negative edges**
 
-Total test edges: **1700**
+Total test edges: **3490**
 
 This makes the task more realistic and prevents trivial classifiers.
 
