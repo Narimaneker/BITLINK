@@ -203,10 +203,10 @@ jobs:
           SCORE="${{ steps.result.outputs.score }}"
           ERRORS="${{ steps.decrypt.outputs.error }}${{ steps.result.outputs.errors }}"
 
-          mkdir -p submissions/inbox/$TEAM/$RUN_ID
+          mkdir -p submissions/scores/$TEAM/
 
           if [ "$VALID" = "True" ]; then
-            cat > submissions/inbox/$TEAM/$RUN_ID/score.txt << EOF
+            cat > submissions/scores/$TEAM/score.txt << EOF
           ╔══════════════════════════════════════╗
           ║     BITLINK Evaluation Result        ║
           ╠══════════════════════════════════════╣
