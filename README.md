@@ -173,7 +173,7 @@ del submissions\inbox\YOUR_TEAM_NAME\predictions.csv
 rm submissions/inbox/YOUR_TEAM_NAME/predictions.csv
 Then go to GitHub → open a **Pull Request** from your fork to the main repository.
 
-> ⚠️ **Do NOT merge the PR yourself.** The system handles everything automatically.
+> 
 
 ### Step 7 — Check your score
 After **2-5 minutes**, a `score.txt` is automatically written to your submission folder:
