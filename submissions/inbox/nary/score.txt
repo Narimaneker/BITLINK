@@ -1,0 +1,10 @@
+╔══════════════════════════════════════╗
+║     BITLINK Evaluation Result        ║
+╠══════════════════════════════════════╣
+║ Team   : nary
+║ Score  : 0.48590646464646464 (ROC-AUC)
+║ Status : Valid
+║ Time   : Tue Feb 17 13:48:47 UTC 2026
+╚══════════════════════════════════════╝
+Your score has been added to the leaderboard!
+View: https://github.com/Narimaneker/BITLINK/blob/main/leaderboard/leaderboard.md
